@@ -1,0 +1,98 @@
+{
+  "meta_config": {
+    "meta_iters": 4000,
+    "tasks_per_batch": 2,
+    "k_support": 4,
+    "k_query": 4,
+    "lr_inner": 0.001,
+    "lr_meta": 0.1,
+    "inner_steps": 5
+  },
+  "eval_config": {
+    "eval_steps": 50,
+    "eval_lr_inner": 0.001,
+    "eval_batch_size": 8,
+    "n_vis_per_task": 2
+  },
+  "best_dice": 5.0077946234239334e-09,
+  "results": [
+    {
+      "task": "./val/task_4",
+      "shots": 1,
+      "dice": 4.987937618494698e-09,
+      "image_paths": [
+        "results/images/task_task_4_shots_1_idx_0_img.png",
+        "results/images/task_task_4_shots_1_idx_0_gt.png",
+        "results/images/task_task_4_shots_1_idx_0_pred.png",
+        "results/images/task_task_4_shots_1_idx_1_img.png",
+        "results/images/task_task_4_shots_1_idx_1_gt.png",
+        "results/images/task_task_4_shots_1_idx_1_pred.png"
+      ]
+    },
+    {
+      "task": "./val/task_4",
+      "shots": 3,
+      "dice": 4.998917280119031e-09,
+      "image_paths": [
+        "results/images/task_task_4_shots_3_idx_0_img.png",
+        "results/images/task_task_4_shots_3_idx_0_gt.png",
+        "results/images/task_task_4_shots_3_idx_0_pred.png",
+        "results/images/task_task_4_shots_3_idx_1_img.png",
+        "results/images/task_task_4_shots_3_idx_1_gt.png",
+        "results/images/task_task_4_shots_3_idx_1_pred.png"
+      ]
+    },
+    {
+      "task": "./val/task_4",
+      "shots": 5,
+      "dice": 5.0077946234239334e-09,
+      "image_paths": [
+        "results/images/task_task_4_shots_5_idx_0_img.png",
+        "results/images/task_task_4_shots_5_idx_0_gt.png",
+        "results/images/task_task_4_shots_5_idx_0_pred.png",
+        "results/images/task_task_4_shots_5_idx_1_img.png",
+        "results/images/task_task_4_shots_5_idx_1_gt.png",
+        "results/images/task_task_4_shots_5_idx_1_pred.png"
+      ]
+    },
+    {
+      "task": "./val/task_6",
+      "shots": 1,
+      "dice": 1.8724299888361884e-09,
+      "image_paths": [
+        "results/images/task_task_6_shots_1_idx_0_img.png",
+        "results/images/task_task_6_shots_1_idx_0_gt.png",
+        "results/images/task_task_6_shots_1_idx_0_pred.png",
+        "results/images/task_task_6_shots_1_idx_1_img.png",
+        "results/images/task_task_6_shots_1_idx_1_gt.png",
+        "results/images/task_task_6_shots_1_idx_1_pred.png"
+      ]
+    },
+    {
+      "task": "./val/task_6",
+      "shots": 3,
+      "dice": 1.8742090102108477e-09,
+      "image_paths": [
+        "results/images/task_task_6_shots_3_idx_0_img.png",
+        "results/images/task_task_6_shots_3_idx_0_gt.png",
+        "results/images/task_task_6_shots_3_idx_0_pred.png",
+        "results/images/task_task_6_shots_3_idx_1_img.png",
+        "results/images/task_task_6_shots_3_idx_1_gt.png",
+        "results/images/task_task_6_shots_3_idx_1_pred.png"
+      ]
+    },
+    {
+      "task": "./val/task_6",
+      "shots": 5,
+      "dice": 1.873532662344246e-09,
+      "image_paths": [
+        "results/images/task_task_6_shots_5_idx_0_img.png",
+        "results/images/task_task_6_shots_5_idx_0_gt.png",
+        "results/images/task_task_6_shots_5_idx_0_pred.png",
+        "results/images/task_task_6_shots_5_idx_1_img.png",
+        "results/images/task_task_6_shots_5_idx_1_gt.png",
+        "results/images/task_task_6_shots_5_idx_1_pred.png"
+      ]
+    }
+  ]
+}
