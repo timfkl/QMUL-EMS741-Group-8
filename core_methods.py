@@ -297,13 +297,18 @@ def reptile_meta_train(
     n_shot_val: int = 5,
 ):
     """
-    Reptile meta-training loop.
+    Reptile meta-training loop with running loss/val logging.
 
-    Returns (meta_model, history).
+    Returns (meta_model, history) where history has:
+      - "outer_step"
+      - "val_dice"
+      - "meta_loss"
     """
     meta_model = UNet().to(DEVICE)
     task_names = list(train_tasks.keys())
-    history = {"outer_step": [], "val_dice": []}
+    history = {"outer_step": [], "val_dice": [], "meta_loss": []}
+
+    running_losses = []
 
     for outer in range(1, n_outer + 1):
         task_name = random.choice(task_names)
@@ -314,6 +319,7 @@ def reptile_meta_train(
         opt_inner = torch.optim.SGD(fast.parameters(), lr=inner_lr)
 
         fast.train()
+        inner_losses = []
         for _ in range(k_inner):
             idxs = random.sample(
                 range(len(dataset)),
@@ -327,10 +333,21 @@ def reptile_meta_train(
             loss = bce_dice_loss(preds, masks)
             loss.backward()
             opt_inner.step()
+            inner_losses.append(loss.item())
 
         with torch.no_grad():
             for mp, fp in zip(meta_model.parameters(), fast.parameters()):
                 mp.data += meta_lr * (fp.data - mp.data)
+
+        mean_inner = float(np.mean(inner_losses)) if inner_losses else 0.0
+        running_losses.append(mean_inner)
+        history["meta_loss"].append(mean_inner)
+
+        if outer % 50 == 0:
+            print(
+                f"[Reptile] outer {outer:5d}/{n_outer} "
+                f"inner loss {mean_inner:.4f}"
+            )
 
         if outer % val_every == 0:
             val_d = evaluate_few_shot(
@@ -342,6 +359,10 @@ def reptile_meta_train(
             )
             history["outer_step"].append(outer)
             history["val_dice"].append(val_d)
+            print(
+                f"[Reptile] outer {outer:5d}/{n_outer} "
+                f"val Dice (n_shot={n_shot_val}) {val_d:.4f}"
+            )
 
     return meta_model, history
 
