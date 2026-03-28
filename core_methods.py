@@ -149,22 +149,35 @@ class FewShotEpisodeDataset:
 
         self.support = {
             "images": [task_dict["images"][i] for i in support_idx],
-            "masks": [task_dict["masks"][i] for i in support_idx],
+            "masks":  [task_dict["masks"][i]  for i in support_idx],
         }
         self.query = {
             "images": [task_dict["images"][i] for i in query_idx],
-            "masks": [task_dict["masks"][i] for i in query_idx],
+            "masks":  [task_dict["masks"][i]  for i in query_idx],
         }
 
     def support_loader(self, batch_size=None):
         ds = SegDataset(self.support, augment=False)
         bs = batch_size or len(ds)
-        return DataLoader(ds, batch_size=bs, shuffle=True)
+        return DataLoader(
+            ds,
+            batch_size=bs,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
+        )
 
     def query_loader(self, batch_size: int = 4):
         ds = SegDataset(self.query, augment=False)
-        return DataLoader(ds, batch_size=batch_size, shuffle=False)
-
+        return DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
+        )
 
 # Backwards-compatible alias if you want to use the shorter name
 FewShotEpisode = FewShotEpisodeDataset
@@ -303,7 +316,8 @@ def run_inner_loop(
             data_iter = iter(support_loader)
             imgs, masks = next(data_iter)
 
-        imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+        imgs = imgs.to(DEVICE, non_blocking=True)
+        masks = masks.to(DEVICE, non_blocking=True)
         opt.zero_grad()
         preds = model(imgs)
         loss = bce_dice_loss(preds, masks)
@@ -347,7 +361,8 @@ def train_baseline(
         model.train()
         running_loss = 0.0
         for imgs, masks in support_loader:
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+            imgs = imgs.to(DEVICE, non_blocking=True)
+            masks = masks.to(DEVICE, non_blocking=True)
             opt.zero_grad()
             preds = model(imgs)
             loss = bce_dice_loss(preds, masks)
@@ -359,7 +374,8 @@ def train_baseline(
         dice_vals = []
         with torch.no_grad():
             for imgs, masks in query_loader:
-                imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+                imgs = imgs.to(DEVICE, non_blocking=True)
+                masks = masks.to(DEVICE, non_blocking=True)
                 dice_vals.append(dice_score(model(imgs), masks))
 
         history["train_loss"].append(
@@ -417,7 +433,12 @@ def reptile_meta_train(
         task_dict = train_tasks[task_name]
         dataset = SegDataset(task_dict, augment=True)
         support_loader = DataLoader(
-            dataset, batch_size=min(batch_size, len(dataset)), shuffle=True
+            dataset, 
+            batch_size=min(batch_size, len(dataset)), 
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
         )
 
         # Clone meta-parameters for inner loop
@@ -524,7 +545,8 @@ def adapt_and_evaluate(
     dice_vals = []
     with torch.no_grad():
         for imgs, masks in episode.query_loader(batch_size=4):
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+            imgs = imgs.to(DEVICE, non_blocking=True)
+            masks = masks.to(DEVICE, non_blocking=True)
             dice_vals.append(dice_score(adapted(imgs), masks))
 
     return float(np.mean(dice_vals)), adapted, episode
@@ -584,7 +606,8 @@ def unified_adapt_and_evaluate(
     dice_vals = []
     with torch.no_grad():
         for imgs, masks in episode.query_loader(batch_size=4):
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+            imgs = imgs.to(DEVICE, non_blocking=True)
+            masks = masks.to(DEVICE, non_blocking=True)
             dice_vals.append(dice_score(adapted(imgs), masks))
 
     return float(np.mean(dice_vals)), adapted, episode
