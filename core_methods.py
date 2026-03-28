@@ -275,7 +275,7 @@ def bce_dice_loss(pred, target, bce_weight: float = BCE_WEIGHT):
 
 
 @torch.no_grad()
-def dice_score(pred, target, threshold: float = 0.5, smooth: float = 1.0):
+def dice_score(pred, target, threshold: float = 0.2, smooth: float = 1.0):
     pred_bin = (pred > threshold).float()
     inter = (pred_bin * target).sum()
     return float(
