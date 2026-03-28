@@ -343,7 +343,7 @@ def reptile_meta_train(
         running_losses.append(mean_inner)
         history["meta_loss"].append(mean_inner)
 
-        if outer % 50 == 0:
+        if outer % 10 == 0:
             print(
                 f"[Reptile] outer {outer:5d}/{n_outer} "
                 f"inner loss {mean_inner:.4f}"
