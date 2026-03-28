@@ -43,9 +43,9 @@ DEFAULT_CONFIG = {
     "BCE_WEIGHT": BCE_WEIGHT,
     # Optional extras (disabled by default)
     "NORM": "group",  # 'batch' or 'group'
-    "USE_VAL_DICE_EMA": False,
+    "USE_VAL_DICE_EMA": True,
     "VAL_DICE_EMA_ALPHA": 0.3,
-    "CHECKPOINT_BEST": False,
+    "CHECKPOINT_BEST": True,
     "CHECKPOINT_PATH": "metamodel_best.pth",
 }
 
