@@ -26,7 +26,7 @@ IMG_SIZE = 256
 # Global config and utilities
 # ---------------------------------------------------------------------
 
-BCE_WEIGHT = 0.5  # default BCE weight in BCE+Dice
+BCE_WEIGHT = 0.2  # default BCE weight in BCE+Dice
 
 DEFAULT_CONFIG = {
     "N_OUTER": 2000,
@@ -42,7 +42,7 @@ DEFAULT_CONFIG = {
     "BASELINE_LR": 1e-3,
     "BCE_WEIGHT": BCE_WEIGHT,
     # Optional extras (disabled by default)
-    "NORM": "batch",  # or 'group'
+    "NORM": "group",  # 'batch' or 'group'
     "USE_VAL_DICE_EMA": False,
     "VAL_DICE_EMA_ALPHA": 0.3,
     "CHECKPOINT_BEST": False,
