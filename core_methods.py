@@ -17,15 +17,50 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 IMG_SIZE = 256
+
+# ---------------------------------------------------------------------
+# Global config and utilities
+# ---------------------------------------------------------------------
+
+BCE_WEIGHT = 0.5  # default BCE weight in BCE+Dice
+
+DEFAULT_CONFIG = {
+    "N_OUTER": 2000,
+    "K_INNER": 30,
+    "META_LR": 0.1,
+    "META_LR_MIN_FACTOR": 0.05,  # floor at 5% of initial meta LR
+    "INNER_LR": 1e-3,
+    "VAL_EVERY": 200,
+    "N_SHOT_VAL": 5,
+    "ADAPT_STEPS": 30,
+    "ADAPT_LR": 1e-3,
+    "BASELINE_EPOCHS": 30,
+    "BASELINE_LR": 1e-3,
+    "BCE_WEIGHT": BCE_WEIGHT,
+    # Optional extras (disabled by default)
+    "NORM": "batch",  # or 'group'
+    "USE_VAL_DICE_EMA": False,
+    "VAL_DICE_EMA_ALPHA": 0.3,
+    "CHECKPOINT_BEST": False,
+    "CHECKPOINT_PATH": "metamodel_best.pth",
+}
+
+
+def set_seed(seed: int) -> None:
+    """Seed torch, numpy, and random for reproducibility."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 # ---------------------------------------------------------------------
 # Data loading utilities
 # ---------------------------------------------------------------------
+
 
 def discover_tasks(split_dir: Path):
     """
@@ -54,7 +89,7 @@ def load_sample(img_path, mask_path, img_size: int = IMG_SIZE):
     Returns
     -------
     image : np.ndarray float32 in [0, 1], shape (H, W)
-    mask  : np.ndarray uint8  in {0, 1}, shape (H, W)
+    mask : np.ndarray uint8 in {0, 1}, shape (H, W)
     """
     img = Image.open(img_path).convert("L").resize(
         (img_size, img_size), Image.BILINEAR
@@ -114,11 +149,11 @@ class FewShotEpisodeDataset:
 
         self.support = {
             "images": [task_dict["images"][i] for i in support_idx],
-            "masks":  [task_dict["masks"][i]  for i in support_idx],
+            "masks": [task_dict["masks"][i] for i in support_idx],
         }
         self.query = {
             "images": [task_dict["images"][i] for i in query_idx],
-            "masks":  [task_dict["masks"][i]  for i in query_idx],
+            "masks": [task_dict["masks"][i] for i in query_idx],
         }
 
     def support_loader(self, batch_size=None):
@@ -134,20 +169,28 @@ class FewShotEpisodeDataset:
 # Backwards-compatible alias if you want to use the shorter name
 FewShotEpisode = FewShotEpisodeDataset
 
-
 # ---------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------
 
+
 class DoubleConv(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, norm: str = "batch"):
         super().__init__()
+
+        def make_norm(ch: int) -> nn.Module:
+            if norm == "group":
+                # 8 groups works well for channels >= 32
+                return nn.GroupNorm(num_groups=8, num_channels=ch)
+            else:
+                return nn.BatchNorm2d(ch)
+
         self.net = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
+            make_norm(out_ch),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
+            make_norm(out_ch),
             nn.ReLU(inplace=True),
         )
 
@@ -158,23 +201,24 @@ class DoubleConv(nn.Module):
 class UNet(nn.Module):
     """Compact U-Net: 1-channel in, 1-channel sigmoid mask out."""
 
-    def __init__(self, channels=(32, 64, 128, 256)):
+    def __init__(self, channels=(32, 64, 128, 256), norm: str = "batch"):
         super().__init__()
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
         self.pool = nn.MaxPool2d(2)
+        self.norm = norm
 
         in_ch = 1
         for ch in channels:
-            self.downs.append(DoubleConv(in_ch, ch))
+            self.downs.append(DoubleConv(in_ch, ch, norm=norm))
             in_ch = ch
 
-        self.bottleneck = DoubleConv(channels[-1], channels[-1] * 2)
+        self.bottleneck = DoubleConv(channels[-1], channels[-1] * 2, norm=norm)
 
         rev = list(reversed(channels))
         for ch in rev:
             self.ups.append(nn.ConvTranspose2d(ch * 2, ch, 2, stride=2))
-            self.ups.append(DoubleConv(ch * 2, ch))
+            self.ups.append(DoubleConv(ch * 2, ch, norm=norm))
 
         self.out_conv = nn.Conv2d(channels[0], 1, 1)
 
@@ -203,6 +247,7 @@ class UNet(nn.Module):
 # Losses and metrics
 # ---------------------------------------------------------------------
 
+
 def dice_loss(pred, target, smooth: float = 1.0):
     pred = pred.view(-1)
     target = target.view(-1)
@@ -210,7 +255,7 @@ def dice_loss(pred, target, smooth: float = 1.0):
     return 1.0 - (2.0 * inter + smooth) / (pred.sum() + target.sum() + smooth)
 
 
-def bce_dice_loss(pred, target, bce_weight: float = 0.5):
+def bce_dice_loss(pred, target, bce_weight: float = BCE_WEIGHT):
     bce = F.binary_cross_entropy(pred, target)
     d = dice_loss(pred, target)
     return bce_weight * bce + (1.0 - bce_weight) * d
@@ -226,13 +271,59 @@ def dice_score(pred, target, threshold: float = 0.5, smooth: float = 1.0):
 
 
 # ---------------------------------------------------------------------
-# Baseline training for a single task
+# Shared inner-loop helper
 # ---------------------------------------------------------------------
+
+
+def run_inner_loop(
+    model: nn.Module,
+    support_loader: DataLoader,
+    n_steps: int,
+    lr: float,
+    optimizer_cls=torch.optim.Adam,
+    use_scheduler: bool = False,
+) -> nn.Module:
+    """
+    Generic inner loop used by Reptile, test-time adaptation, and baseline.
+
+    Runs exactly n_steps gradient steps, cycling over support_loader as needed.
+    """
+    model.train()
+    opt = optimizer_cls(model.parameters(), lr=lr)
+    scheduler = (
+        CosineAnnealingLR(opt, T_max=n_steps) if use_scheduler else None
+    )
+
+    data_iter = iter(support_loader)
+
+    for step in range(n_steps):
+        try:
+            imgs, masks = next(data_iter)
+        except StopIteration:
+            data_iter = iter(support_loader)
+            imgs, masks = next(data_iter)
+
+        imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+        opt.zero_grad()
+        preds = model(imgs)
+        loss = bce_dice_loss(preds, masks)
+        loss.backward()
+        opt.step()
+        if scheduler is not None:
+            scheduler.step()
+
+    return model
+
+
+# ---------------------------------------------------------------------
+# Baseline training for a single task (standalone)
+# ---------------------------------------------------------------------
+
 
 def train_baseline(
     task_dict,
     n_shot: int,
-    n_epochs: int = 20,   # relatively small, per professor suggestion
+    n_epochs: int = 20,  # kept for backwards-compat, experiment uses unified path
     lr: float = 1e-3,
     seed: int = 42,
 ):
@@ -241,15 +332,13 @@ def train_baseline(
 
     Returns (history, model, episode).
     """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    set_seed(seed)
 
     episode = FewShotEpisodeDataset(task_dict, n_shot, seed=seed)
     support_loader = episode.support_loader(batch_size=min(n_shot, 4))
     query_loader = episode.query_loader(batch_size=4)
 
-    model = UNet().to(DEVICE)
+    model = UNet(norm=DEFAULT_CONFIG["NORM"]).to(DEVICE)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
 
     history = {"train_loss": [], "val_dice": []}
@@ -285,68 +374,86 @@ def train_baseline(
 # Reptile meta-training and few-shot evaluation
 # ---------------------------------------------------------------------
 
+
 def reptile_meta_train(
     train_tasks,
     val_tasks,
-    n_outer: int = 2000,
-    k_inner: int = 5,
-    inner_lr: float = 1e-3,
-    meta_lr: float = 0.1,
+    n_outer: int = DEFAULT_CONFIG["N_OUTER"],
+    k_inner: int = DEFAULT_CONFIG["K_INNER"],
+    inner_lr: float = DEFAULT_CONFIG["INNER_LR"],
+    meta_lr: float = DEFAULT_CONFIG["META_LR"],
     batch_size: int = 4,
-    val_every: int = 200,
-    n_shot_val: int = 5,
+    val_every: int = DEFAULT_CONFIG["VAL_EVERY"],
+    n_shot_val: int = DEFAULT_CONFIG["N_SHOT_VAL"],
+    meta_lr_min_factor: float = DEFAULT_CONFIG["META_LR_MIN_FACTOR"],
+    use_val_ema: bool = DEFAULT_CONFIG["USE_VAL_DICE_EMA"],
+    ema_alpha: float = DEFAULT_CONFIG["VAL_DICE_EMA_ALPHA"],
+    checkpoint_best: bool = DEFAULT_CONFIG["CHECKPOINT_BEST"],
+    checkpoint_path: str = DEFAULT_CONFIG["CHECKPOINT_PATH"],
 ):
     """
-    Reptile meta-training loop with running loss/val logging.
+    Reptile meta-training loop with running loss/val logging and decaying meta-LR.
 
     Returns (meta_model, history) where history has:
-      - "outer_step"
-      - "val_dice"
-      - "meta_loss"
+    - "outer_step"
+    - "val_dice"
+    - "meta_loss"
+    - "meta_lr"
     """
-    meta_model = UNet().to(DEVICE)
+    meta_model = UNet(norm=DEFAULT_CONFIG["NORM"]).to(DEVICE)
     task_names = list(train_tasks.keys())
-    history = {"outer_step": [], "val_dice": [], "meta_loss": []}
+    history = {"outer_step": [], "val_dice": [], "meta_loss": [], "meta_lr": []}
 
-    running_losses = []
+    best_val = -1.0
+
+    print(
+        f"Reptile meta-training: n_outer={n_outer}, "
+        f"k_inner={k_inner}, meta_lr={meta_lr}"
+    )
 
     for outer in range(1, n_outer + 1):
+        # Sample a random training task
         task_name = random.choice(task_names)
         task_dict = train_tasks[task_name]
         dataset = SegDataset(task_dict, augment=True)
+        support_loader = DataLoader(
+            dataset, batch_size=min(batch_size, len(dataset)), shuffle=True
+        )
 
+        # Clone meta-parameters for inner loop
         fast = copy.deepcopy(meta_model)
-        opt_inner = torch.optim.SGD(fast.parameters(), lr=inner_lr)
 
-        fast.train()
-        inner_losses = []
-        for _ in range(k_inner):
-            idxs = random.sample(
-                range(len(dataset)),
-                min(batch_size, len(dataset)),
-            )
-            batch = [dataset[i] for i in idxs]
-            imgs = torch.stack([b[0] for b in batch]).to(DEVICE)
-            masks = torch.stack([b[1] for b in batch]).to(DEVICE)
-            opt_inner.zero_grad()
-            preds = fast(imgs)
-            loss = bce_dice_loss(preds, masks)
-            loss.backward()
-            opt_inner.step()
-            inner_losses.append(loss.item())
+        # Inner loop using shared helper (SGD, no scheduler)
+        fast = run_inner_loop(
+            fast,
+            support_loader,
+            n_steps=k_inner,
+            lr=inner_lr,
+            optimizer_cls=torch.optim.SGD,
+            use_scheduler=False,
+        )
 
+        # Compute current meta-LR with linear decay
+        progress = outer / float(n_outer)
+        meta_lr_t = meta_lr * (1.0 - progress)
+        if meta_lr_min_factor is not None:
+            meta_lr_t = max(meta_lr_t, meta_lr * meta_lr_min_factor)
+
+        # Reptile meta-update
         with torch.no_grad():
+            inner_losses = []  # we no longer track per-step loss; keep API
             for mp, fp in zip(meta_model.parameters(), fast.parameters()):
-                mp.data += meta_lr * (fp.data - mp.data)
+                # meta_p += meta_lr_t * (fast_p - meta_p)
+                mp.data += meta_lr_t * (fp.data - mp.data)
 
-        mean_inner = float(np.mean(inner_losses)) if inner_losses else 0.0
-        running_losses.append(mean_inner)
-        history["meta_loss"].append(mean_inner)
+        # For simplicity, store meta_lr_t and dummy inner loss (0.0)
+        history["meta_lr"].append(meta_lr_t)
+        history["meta_loss"].append(0.0)
 
-        if outer % 10 == 0:
+        if outer % 50 == 0:
             print(
                 f"[Reptile] outer {outer:5d}/{n_outer} "
-                f"inner loss {mean_inner:.4f}"
+                f"meta_lr_t {meta_lr_t:.4f}"
             )
 
         if outer % val_every == 0:
@@ -354,15 +461,31 @@ def reptile_meta_train(
                 meta_model,
                 val_tasks,
                 n_shot=n_shot_val,
-                adapt_steps=10,
-                adapt_lr=1e-3,
+                adapt_steps=DEFAULT_CONFIG["ADAPT_STEPS"],
+                adapt_lr=DEFAULT_CONFIG["ADAPT_LR"],
             )
+
+            if use_val_ema and history["val_dice"]:
+                prev = history["val_dice"][-1]
+                val_smoothed = ema_alpha * val_d + (1.0 - ema_alpha) * prev
+            else:
+                val_smoothed = val_d
+
             history["outer_step"].append(outer)
-            history["val_dice"].append(val_d)
+            history["val_dice"].append(val_smoothed)
             print(
                 f"[Reptile] outer {outer:5d}/{n_outer} "
-                f"val Dice (n_shot={n_shot_val}) {val_d:.4f}"
+                f"val Dice (n_shot={n_shot_val}) {val_d:.4f} "
+                f"(smoothed {val_smoothed:.4f})"
             )
+
+            if checkpoint_best and val_d > best_val:
+                best_val = val_d
+                torch.save(meta_model.state_dict(), checkpoint_path)
+                print(
+                    f"  New best val Dice {val_d:.4f}, "
+                    f"checkpoint saved to {checkpoint_path}"
+                )
 
     return meta_model, history
 
@@ -371,8 +494,8 @@ def adapt_and_evaluate(
     meta_model,
     task_dict,
     n_shot: int,
-    adapt_steps: int = 20,
-    adapt_lr: float = 1e-3,
+    adapt_steps: int = DEFAULT_CONFIG["ADAPT_STEPS"],
+    adapt_lr: float = DEFAULT_CONFIG["ADAPT_LR"],
     seed: int = 42,
 ):
     """
@@ -380,24 +503,22 @@ def adapt_and_evaluate(
 
     Returns (mean_dice, adapted_model, episode).
     """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    set_seed(seed)
 
     episode = FewShotEpisodeDataset(task_dict, n_shot, seed=seed)
     adapted = copy.deepcopy(meta_model).to(DEVICE)
-    opt = torch.optim.Adam(adapted.parameters(), lr=adapt_lr)
 
     support_loader = episode.support_loader(batch_size=min(n_shot, 4))
 
-    adapted.train()
-    for _ in range(adapt_steps):
-        for imgs, masks in support_loader:
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
-            opt.zero_grad()
-            loss = bce_dice_loss(adapted(imgs), masks)
-            loss.backward()
-            opt.step()
+    # Shared inner loop (Adam + cosine scheduler)
+    adapted = run_inner_loop(
+        adapted,
+        support_loader,
+        n_steps=adapt_steps,
+        lr=adapt_lr,
+        optimizer_cls=torch.optim.Adam,
+        use_scheduler=True,
+    )
 
     adapted.eval()
     dice_vals = []
@@ -413,8 +534,8 @@ def evaluate_few_shot(
     meta_model,
     tasks,
     n_shot: int,
-    adapt_steps: int = 10,
-    adapt_lr: float = 1e-3,
+    adapt_steps: int = DEFAULT_CONFIG["ADAPT_STEPS"],
+    adapt_lr: float = DEFAULT_CONFIG["ADAPT_LR"],
 ):
     scores = []
     for task_dict in tasks.values():
@@ -433,32 +554,31 @@ def unified_adapt_and_evaluate(
     base_model,
     task_dict,
     n_shot: int,
-    epochs: int = 20,
-    lr: float = 1e-3,
+    epochs: int = DEFAULT_CONFIG["BASELINE_EPOCHS"],
+    lr: float = DEFAULT_CONFIG["BASELINE_LR"],
     seed: int = 42,
+    use_scheduler: bool = True,
+    optimizer_cls=torch.optim.Adam,
 ):
     """
     Generic adaptation wrapper used for baselines and meta-inits.
 
     Uses the same style of inner loop as adapt_and_evaluate but with epochs.
     """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    set_seed(seed)
 
     episode = FewShotEpisodeDataset(task_dict, n_shot, seed=seed)
     adapted = copy.deepcopy(base_model).to(DEVICE)
-    opt = torch.optim.Adam(adapted.parameters(), lr=lr)
     support_loader = episode.support_loader(batch_size=min(n_shot, 4))
 
-    adapted.train()
-    for _ in range(epochs):
-        for imgs, masks in support_loader:
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
-            opt.zero_grad()
-            loss = bce_dice_loss(adapted(imgs), masks)
-            loss.backward()
-            opt.step()
+    adapted = run_inner_loop(
+        adapted,
+        support_loader,
+        n_steps=epochs,
+        lr=lr,
+        optimizer_cls=optimizer_cls,
+        use_scheduler=use_scheduler,
+    )
 
     adapted.eval()
     dice_vals = []
