@@ -9,7 +9,6 @@ from pathlib import Path
 import copy
 import random
 
-from datetime import datetime
 import numpy as np
 from PIL import Image
 
@@ -28,7 +27,7 @@ IMG_SIZE = 256
 # ---------------------------------------------------------------------
 
 BCE_WEIGHT = 0.2  # default BCE weight in BCE+Dice
-RUN_ID = datetime.now().strftime("%y%m%d_%H%M")
+
 
 DEFAULT_CONFIG = {
     "N_OUTER": 2000,
