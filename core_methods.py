@@ -9,6 +9,7 @@ from pathlib import Path
 import copy
 import random
 
+from datetime import datetime
 import numpy as np
 from PIL import Image
 
@@ -27,6 +28,7 @@ IMG_SIZE = 256
 # ---------------------------------------------------------------------
 
 BCE_WEIGHT = 0.2  # default BCE weight in BCE+Dice
+RUN_ID = datetime.now().strftime("%y%m%d_%H%M")
 
 DEFAULT_CONFIG = {
     "N_OUTER": 2000,
@@ -46,7 +48,7 @@ DEFAULT_CONFIG = {
     "USE_VAL_DICE_EMA": True,
     "VAL_DICE_EMA_ALPHA": 0.3,
     "CHECKPOINT_BEST": True,
-    "CHECKPOINT_PATH": "metamodel_best.pth",
+    "CHECKPOINT_PATH": f"metamodel_best-{RUN_ID}.pt",
 }
 
 
@@ -421,6 +423,8 @@ def reptile_meta_train(
     history = {"outer_step": [], "val_dice": [], "meta_loss": [], "meta_lr": []}
 
     best_val = -1.0
+    best_weights = None
+    best_step = 0
 
     print(
         f"Reptile meta-training: n_outer={n_outer}, "
@@ -502,13 +506,16 @@ def reptile_meta_train(
 
             if checkpoint_best and val_d > best_val:
                 best_val = val_d
+                best_step = outer
+                best_weights = copy.deepcopy(meta_model.state_dict())
+
                 torch.save(meta_model.state_dict(), checkpoint_path)
                 print(
-                    f"  New best val Dice {val_d:.4f}, "
+                    f"  New best val Dice {val_d:.4f}, at step {best_step}, "
                     f"checkpoint saved to {checkpoint_path}"
                 )
 
-    return meta_model, history
+    return meta_model, history, best_val, best_step, best_weights, checkpoint_path
 
 
 def adapt_and_evaluate(
