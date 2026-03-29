@@ -141,7 +141,10 @@ class SegDataset(Dataset):
 
 
 class FewShotEpisodeDataset:
-    """Returns exactly n_shot support samples and all remaining as query."""
+    """
+    Splits a task into n_shot support samples and all remaining slices as query.
+    The split is deterministic given the same seed, ensuring reproducible episodes.
+    """
 
     def __init__(self, task_dict, n_shot: int, seed: int = 42):
         rng = random.Random(seed)
@@ -190,6 +193,10 @@ FewShotEpisode = FewShotEpisodeDataset
 
 
 class DoubleConv(nn.Module):
+    """
+    Two sequential Conv2d → Norm → ReLU blocks.
+    Supports 'batch' (BatchNorm2d) or 'group' (GroupNorm, 8 groups) normalisation.
+    """
     def __init__(self, in_ch, out_ch, norm: str = "batch"):
         super().__init__()
 
@@ -278,6 +285,14 @@ def bce_dice_loss(pred, target, bce_weight: float = BCE_WEIGHT):
 
 @torch.no_grad()
 def dice_score(pred, target, threshold: float = 0.2, smooth: float = 1.0):
+    """
+    Compute binary Dice score after thresholding sigmoid predictions.
+
+    threshold: binarisation cutoff. Set to 0.2 (rather than 0.5) to be
+               more permissive with low-confidence predictions on small 
+               foreground regions typical in abdominal MRI segmentation.
+    smooth: Laplace smoothing term to avoid division by zero.
+    """
     pred_bin = (pred > threshold).float()
     inter = (pred_bin * target).sum()
     return float(
@@ -301,7 +316,12 @@ def run_inner_loop(
     """
     Generic inner loop used by Reptile, test-time adaptation, and baseline.
 
-    Runs exactly n_steps gradient steps, cycling over support_loader as needed.
+    Runs exactly n_steps gradient steps on the support set, cycling back to
+    the start of support_loader if exhausted (important for small n_shot where
+    the loader may have fewer batches than n_steps).
+
+    optimizer_cls: any torch.optim class, passed as a constructor (not instance).
+    use_scheduler: if True, applies CosineAnnealingLR over n_steps.
     """
     model.train()
     opt = optimizer_cls(model.parameters(), lr=lr)
@@ -345,6 +365,11 @@ def train_baseline(
 ):
     """
     Train a fresh UNet on n_shot examples of a task.
+
+    .. deprecated::
+        This function is kept for backwards compatibility. All experiments
+        now use unified_adapt_and_evaluate(), which shares the inner loop
+        with adapt_and_evaluate for consistency.
 
     Returns (history, model, episode).
     """
@@ -410,14 +435,14 @@ def reptile_meta_train(
     checkpoint_path: str = DEFAULT_CONFIG["CHECKPOINT_PATH"],
 ):
     """
-    Reptile meta-training loop with running loss/val logging and decaying meta-LR.
+    Reptile meta-training loop with val logging and decaying meta-LR.
 
     Returns (meta_model, history) where history has:
-    - "outer_step"
-    - "val_dice"
-    - "meta_loss"
-    - "meta_lr"
-    """
+    - "outer_step": list of steps where validation was run
+    - "val_dice":   validation Dice at each val step (optionally EMA-smoothed)
+    - "meta_loss":  placeholder zeros (inner loss not tracked for performance)
+    - "meta_lr":    meta learning rate at each outer step
+        """
     meta_model = UNet(norm=DEFAULT_CONFIG["NORM"]).to(DEVICE)
     task_names = list(train_tasks.keys())
     history = {"outer_step": [], "val_dice": [], "meta_loss": [], "meta_lr": []}
@@ -466,7 +491,6 @@ def reptile_meta_train(
 
         # Reptile meta-update
         with torch.no_grad():
-            inner_losses = []  # we no longer track per-step loss; keep API
             for mp, fp in zip(meta_model.parameters(), fast.parameters()):
                 # meta_p += meta_lr_t * (fast_p - meta_p)
                 mp.data += meta_lr_t * (fp.data - mp.data)
@@ -566,6 +590,12 @@ def evaluate_few_shot(
     adapt_steps: int = DEFAULT_CONFIG["ADAPT_STEPS"],
     adapt_lr: float = DEFAULT_CONFIG["ADAPT_LR"],
 ):
+    """
+    Average adapt_and_evaluate Dice over all tasks in a split.
+    Used internally by reptile_meta_train for validation.
+
+    Returns mean Dice (float) across all tasks.
+    """
     scores = []
     for task_dict in tasks.values():
         d, _, _ = adapt_and_evaluate(
