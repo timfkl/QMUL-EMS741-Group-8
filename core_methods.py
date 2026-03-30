@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "USE_VAL_DICE_EMA": True,
     "VAL_DICE_EMA_ALPHA": 0.3,
     "CHECKPOINT_BEST": True,
-    "CHECKPOINT_PATH": f"metamodel_best-{RUN_ID}.pt",
+    "CHECKPOINT_PATH": f"metamodel_best-.pt",
 }
 
 
