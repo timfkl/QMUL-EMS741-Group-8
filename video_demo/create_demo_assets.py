@@ -1,0 +1,269 @@
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch, Rectangle
+import numpy as np
+import pandas as pd
+from PIL import Image
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "video_demo" / "assets"
+OUT.mkdir(parents=True, exist_ok=True)
+
+
+def load_gray(path, size=256):
+    return np.asarray(Image.open(path).convert("L").resize((size, size)))
+
+
+def pair_for_mask(mask_path):
+    return mask_path.parents[1] / "images" / mask_path.name
+
+
+def strongest_masks(task_dir, n=1):
+    masks = sorted((task_dir / "masks").glob("*.png"))
+    scored = []
+    for mask in masks:
+        arr = np.asarray(Image.open(mask).convert("L"))
+        scored.append((int((arr > 127).sum()), mask))
+    scored = [item for item in scored if item[0] > 0] or scored
+    scored.sort(reverse=True, key=lambda item: item[0])
+    if n == 1:
+        return [scored[0][1]]
+    pick_idx = np.linspace(0, max(0, len(scored) - 1), n, dtype=int)
+    return [scored[i][1] for i in pick_idx]
+
+
+def overlay_mask(image, mask, color=(255, 48, 108), alpha=0.48):
+    img = image.astype(np.float32)
+    rgb = np.stack([img, img, img], axis=-1)
+    mask_bin = mask > 127
+    rgb[mask_bin] = (1 - alpha) * rgb[mask_bin] + alpha * np.array(color)
+    return np.clip(rgb / 255.0, 0, 1)
+
+
+def make_data_gallery():
+    rows = [
+        ("train", "task_2", "Meta-train"),
+        ("train", "task_3", "Meta-train"),
+        ("train", "task_5", "Meta-train"),
+        ("train", "task_7", "Meta-train"),
+        ("val", "task_4", "Validation"),
+        ("val", "task_6", "Validation"),
+        ("test", "task_1", "Held-out test"),
+        ("test", "task_8", "Held-out test"),
+    ]
+    fig, axes = plt.subplots(len(rows), 2, figsize=(6.6, 16.0), dpi=180)
+    for row, (split, task, role) in enumerate(rows):
+        mask_path = strongest_masks(ROOT / split / task, 1)[0]
+        img = load_gray(pair_for_mask(mask_path))
+        mask = load_gray(mask_path)
+        axes[row, 0].imshow(img, cmap="gray")
+        axes[row, 1].imshow(overlay_mask(img, mask))
+        for ax in axes[row]:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+        axes[row, 0].set_ylabel(
+            f"{role}\n{split}/{task}",
+            rotation=0,
+            ha="right",
+            va="center",
+            fontsize=8,
+            labelpad=34,
+        )
+    axes[0, 0].set_title("MRI slice", fontsize=11, weight="bold")
+    axes[0, 1].set_title("Mask overlay", fontsize=11, weight="bold")
+    fig.suptitle("Few-shot segmentation tasks", fontsize=15, weight="bold", y=0.995)
+    fig.tight_layout(rect=[0.12, 0, 1, 0.985])
+    fig.savefig(OUT / "data_gallery.png", facecolor="white")
+    plt.close(fig)
+
+
+def make_episode_visual():
+    task_dir = ROOT / "test" / "task_1"
+    support_masks = strongest_masks(task_dir, 5)
+    query_masks = strongest_masks(task_dir, 3)[::-1]
+    fig = plt.figure(figsize=(12, 5.2), dpi=180)
+    gs = fig.add_gridspec(2, 7, width_ratios=[1, 1, 1, 1, 1, 0.35, 1.3])
+
+    for i, mask_path in enumerate(support_masks):
+        ax = fig.add_subplot(gs[0, i])
+        img = load_gray(pair_for_mask(mask_path))
+        mask = load_gray(mask_path)
+        ax.imshow(overlay_mask(img, mask, color=(54, 162, 235), alpha=0.42))
+        ax.set_title(f"shot {i + 1}", fontsize=8)
+        ax.axis("off")
+
+    arrow_ax = fig.add_subplot(gs[:, 5])
+    arrow_ax.axis("off")
+    arrow_ax.add_patch(
+        FancyArrowPatch(
+            (0.08, 0.5),
+            (0.95, 0.5),
+            arrowstyle="-|>",
+            mutation_scale=28,
+            linewidth=2.4,
+            color="#111827",
+        )
+    )
+
+    for i, mask_path in enumerate(query_masks):
+        ax = fig.add_subplot(gs[1, i])
+        img = load_gray(pair_for_mask(mask_path))
+        mask = load_gray(mask_path)
+        ax.imshow(overlay_mask(img, mask, color=(255, 48, 108), alpha=0.46))
+        ax.set_title(f"query {i + 1}", fontsize=8)
+        ax.axis("off")
+
+    text_ax = fig.add_subplot(gs[:, 6])
+    text_ax.axis("off")
+    text_ax.text(
+        0.02,
+        0.72,
+        "5 annotated support slices\nadapt the meta-initialized U-Net",
+        fontsize=12,
+        weight="bold",
+        ha="left",
+        va="center",
+    )
+    text_ax.text(
+        0.02,
+        0.42,
+        "Remaining query slices are\nheld back for Dice evaluation",
+        fontsize=10,
+        color="#374151",
+        ha="left",
+        va="center",
+    )
+    fig.suptitle("Few-shot episode on held-out task_1", fontsize=16, weight="bold")
+    fig.tight_layout()
+    fig.savefig(OUT / "few_shot_episode.png", facecolor="white")
+    plt.close(fig)
+
+
+def make_reptile_workflow():
+    fig, ax = plt.subplots(figsize=(12.6, 5.8), dpi=180)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    boxes = [
+        (0.04, 0.62, 0.17, 0.18, "Sample task", "train task 2/3/5/7"),
+        (0.30, 0.62, 0.17, 0.18, "Clone U-Net", "start from theta"),
+        (0.56, 0.62, 0.17, 0.18, "Inner loop", "10 SGD steps"),
+        (0.79, 0.62, 0.17, 0.18, "Meta update", "theta moves toward fast weights"),
+        (0.30, 0.18, 0.17, 0.18, "Validate", "5-shot val adaptation"),
+        (0.56, 0.18, 0.17, 0.18, "Checkpoint", "best validation Dice"),
+    ]
+    colors = ["#dbeafe", "#ede9fe", "#dcfce7", "#fff7ed", "#fce7f3", "#e0f2fe"]
+    for (x, y, w, h, title, body), color in zip(boxes, colors):
+        ax.add_patch(Rectangle((x, y), w, h, linewidth=1.6, edgecolor="#111827", facecolor=color))
+        ax.text(x + w / 2, y + h * 0.62, title, ha="center", va="center", fontsize=12, weight="bold")
+        ax.text(x + w / 2, y + h * 0.35, body, ha="center", va="center", fontsize=9, color="#374151")
+
+    arrows = [
+        ((0.21, 0.71), (0.30, 0.71)),
+        ((0.47, 0.71), (0.56, 0.71)),
+        ((0.73, 0.71), (0.79, 0.71)),
+        ((0.875, 0.62), (0.875, 0.46)),
+        ((0.875, 0.46), (0.13, 0.46)),
+        ((0.13, 0.46), (0.13, 0.62)),
+        ((0.385, 0.62), (0.385, 0.36)),
+        ((0.47, 0.27), (0.56, 0.27)),
+    ]
+    for start, end in arrows:
+        ax.add_patch(FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=18, linewidth=1.8, color="#111827"))
+
+    ax.text(
+        0.5,
+        0.92,
+        "Reptile learns an initialization that adapts quickly",
+        ha="center",
+        va="center",
+        fontsize=19,
+        weight="bold",
+    )
+    ax.text(
+        0.5,
+        0.05,
+        "theta <- theta + alpha * (fast weights - theta), with alpha decayed over 8000 outer steps",
+        ha="center",
+        va="center",
+        fontsize=11,
+        color="#374151",
+    )
+    fig.tight_layout()
+    fig.savefig(OUT / "reptile_workflow.png", facecolor="white")
+    plt.close(fig)
+
+
+def make_unet_architecture():
+    fig, ax = plt.subplots(figsize=(13.2, 5.0), dpi=180)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    levels = [
+        (0.06, 0.70, "32", "256x256"),
+        (0.18, 0.58, "64", "128x128"),
+        (0.30, 0.46, "128", "64x64"),
+        (0.42, 0.34, "256", "32x32"),
+        (0.54, 0.22, "512", "16x16"),
+        (0.66, 0.34, "256", "32x32"),
+        (0.78, 0.46, "128", "64x64"),
+        (0.88, 0.58, "64", "128x128"),
+        (0.96, 0.70, "1", "256x256"),
+    ]
+    for i, (x, y, ch, size) in enumerate(levels):
+        w = 0.065 if i not in (0, 8) else 0.05
+        h = 0.18 + 0.018 * (4 - abs(4 - i))
+        color = "#bfdbfe" if i < 4 else "#bbf7d0" if i > 4 else "#fde68a"
+        ax.add_patch(Rectangle((x - w / 2, y - h / 2), w, h, facecolor=color, edgecolor="#111827", linewidth=1.4))
+        ax.text(x, y + 0.025, f"{ch} ch", ha="center", va="center", fontsize=9, weight="bold")
+        ax.text(x, y - 0.045, size, ha="center", va="center", fontsize=7, color="#374151")
+    for i in range(len(levels) - 1):
+        ax.add_patch(FancyArrowPatch((levels[i][0] + 0.035, levels[i][1]), (levels[i + 1][0] - 0.035, levels[i + 1][1]), arrowstyle="-|>", mutation_scale=12, linewidth=1.3, color="#111827"))
+    for left, right in [(0, 8), (1, 7), (2, 6), (3, 5)]:
+        ax.plot([levels[left][0], levels[right][0]], [levels[left][1] + 0.17, levels[right][1] + 0.17], color="#e11d48", linewidth=1.6)
+        ax.text((levels[left][0] + levels[right][0]) / 2, levels[left][1] + 0.19, "skip", ha="center", fontsize=8, color="#9f1239")
+    ax.text(0.5, 0.94, "Compact U-Net backbone", ha="center", va="center", fontsize=19, weight="bold")
+    ax.text(0.5, 0.08, "1-channel MRI slice -> sigmoid probability mask; DoubleConv blocks use GroupNorm for small batches", ha="center", fontsize=10, color="#374151")
+    fig.tight_layout()
+    fig.savefig(OUT / "unet_architecture.png", facecolor="white")
+    plt.close(fig)
+
+
+def make_metric_cards():
+    df = pd.read_csv(ROOT / "results" / "per_structure_results_full.csv")
+    overall = df.groupby("n_shot")[["reptile_mean", "baseline_mean"]].mean().reset_index()
+    overall["advantage"] = overall["reptile_mean"] - overall["baseline_mean"]
+
+    fig, ax = plt.subplots(figsize=(10, 4.8), dpi=180)
+    ax.axis("off")
+    ax.text(0.5, 0.92, "Reptile improves few-shot Dice across shot counts", ha="center", fontsize=17, weight="bold")
+    x0 = 0.08
+    for i, row in overall.iterrows():
+        x = x0 + i * 0.31
+        ax.add_patch(Rectangle((x, 0.28), 0.24, 0.44, facecolor="#f8fafc", edgecolor="#111827", linewidth=1.2))
+        ax.text(x + 0.12, 0.63, f"{int(row.n_shot)}-shot", ha="center", fontsize=13, weight="bold")
+        ax.text(x + 0.12, 0.50, f"Reptile {row.reptile_mean:.3f}", ha="center", fontsize=11, color="#1d4ed8")
+        ax.text(x + 0.12, 0.40, f"Baseline {row.baseline_mean:.3f}", ha="center", fontsize=11, color="#c2410c")
+        ax.text(x + 0.12, 0.30, f"+{row.advantage:.3f} Dice", ha="center", fontsize=12, weight="bold", color="#047857")
+    ax.text(0.5, 0.12, "Averages are computed from results/per_structure_results_full.csv over held-out task_1 and task_8.", ha="center", fontsize=9, color="#475569")
+    fig.tight_layout()
+    fig.savefig(OUT / "metric_cards.png", facecolor="white")
+    plt.close(fig)
+
+
+def main():
+    make_data_gallery()
+    make_episode_visual()
+    make_reptile_workflow()
+    make_unet_architecture()
+    make_metric_cards()
+    print(f"Wrote demo assets to {OUT}")
+
+
+if __name__ == "__main__":
+    main()
