@@ -252,6 +252,24 @@
     </section>
 
     <section>
+      <div class="wide">
+        <p class="kicker">Where This Went Next</p>
+        <h2>Conference-paper extension on the larger 3D dataset</h2>
+        <p class="lede">The original project demonstrated 2D few-shot segmentation. The follow-on group work extends the same medical segmentation direction to full pelvic MRI volumes, using a 3D CNN/U-Net style architecture on the larger source dataset.</p>
+        <img class="figure" src="assets/cnn_architecture_extension.png" alt="High-level schematic of the 3D U-Net for male pelvic segmentation">
+        <p class="caption">Use this as a brief preview only: it shows the later research direction, not the original few-shot evaluation pipeline.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wide">
+        <p class="kicker">3D Scan Preview</p>
+        <h2>NIfTI volumes keep neighboring slices together</h2>
+        <img class="figure plain" src="assets/nii_volume_preview.png" alt="NIfTI scan preview with axial coronal and sagittal label-map views">
+      </div>
+    </section>
+
+    <section>
       <div>
         <p class="kicker">Recording Close</p>
         <h2>What to emphasize in the final video</h2>
@@ -260,7 +278,7 @@
           <div class="step"><b class="accent-rose">2. Model</b><p>U-Net handles the pixel-wise segmentation output.</p></div>
           <div class="step"><b class="accent-amber">3. Reptile</b><p>Meta-training learns weights that can move quickly toward a new task.</p></div>
           <div class="step"><b class="accent-blue">4. Evidence</b><p>Show masks and prediction heatmaps before switching to Dice plots.</p></div>
-          <div class="step"><b class="accent-rose">5. Takeaway</b><p>Meta-initialization beats training the same architecture from scratch.</p></div>
+          <div class="step"><b class="accent-rose">5. Extension</b><p>Close with the later conference-paper move from 2D slices to 3D volumes.</p></div>
         </div>
         <p class="lede">Optional TensorBoard view: run <code>python video_demo/export_tensorboard.py</code>, then <code>tensorboard --logdir video_demo/tensorboard_logs</code>.</p>
       </div>

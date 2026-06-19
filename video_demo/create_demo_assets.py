@@ -42,6 +42,31 @@ def overlay_mask(image, mask, color=(255, 48, 108), alpha=0.48):
     return np.clip(rgb / 255.0, 0, 1)
 
 
+def overlay_labels(image, labels, alpha=0.5):
+    image = image.astype(np.float32)
+    if image.max() > image.min():
+        image = (image - image.min()) / (image.max() - image.min())
+    rgb = np.stack([image, image, image], axis=-1)
+    colors = np.array(
+        [
+            [0.90, 0.10, 0.20],
+            [0.10, 0.45, 0.90],
+            [0.10, 0.70, 0.32],
+            [0.95, 0.55, 0.12],
+            [0.55, 0.25, 0.90],
+            [0.00, 0.70, 0.75],
+            [0.95, 0.25, 0.60],
+            [0.55, 0.75, 0.10],
+        ]
+    )
+    label_int = labels.astype(int)
+    for label in sorted(set(np.unique(label_int)) - {0}):
+        mask = label_int == label
+        color = colors[(label - 1) % len(colors)]
+        rgb[mask] = (1 - alpha) * rgb[mask] + alpha * color
+    return np.clip(rgb, 0, 1)
+
+
 def make_data_gallery():
     rows = [
         ("train", "task_2", "Meta-train"),
@@ -256,12 +281,154 @@ def make_metric_cards():
     plt.close(fig)
 
 
+def make_nii_volume_preview():
+    img_path = ROOT / "001000_img.nii"
+    mask_path = ROOT / "001000_mask.nii"
+    used_real_nii = img_path.exists() and mask_path.exists()
+
+    if used_real_nii:
+        import nibabel as nib
+
+        volume = nib.load(img_path).get_fdata().astype(np.float32)
+        labels = nib.load(mask_path).get_fdata().astype(np.int16)
+        low, high = np.percentile(volume, [1, 99])
+        volume = np.clip((volume - low) / max(high - low, 1e-6), 0, 1)
+        x_idx = int(np.argmax(labels.sum(axis=(1, 2))))
+        y_idx = int(np.argmax(labels.sum(axis=(0, 2))))
+        z_idx = int(np.argmax(labels.sum(axis=(0, 1))))
+
+        views = [
+            ("Axial + label map", np.rot90(volume[:, :, z_idx]), np.rot90(labels[:, :, z_idx])),
+            ("Coronal + label map", np.rot90(volume[:, y_idx, :]), np.rot90(labels[:, y_idx, :])),
+            ("Sagittal + label map", np.rot90(volume[x_idx, :, :]), np.rot90(labels[x_idx, :, :])),
+        ]
+        source_note = "Source files: 001000_img.nii and 001000_mask.nii"
+        volume_title = "Real 3D NIfTI scan with multi-label mask"
+    else:
+        image_dir = ROOT / "test" / "task_1" / "images"
+        grouped = {}
+        for path in sorted(image_dir.glob("*.png")):
+            if "_slice_" not in path.stem:
+                continue
+            sample_id = path.stem.split("_slice_")[0]
+            grouped.setdefault(sample_id, []).append(path)
+        sample_id, paths = max(grouped.items(), key=lambda item: len(item[1]))
+        volume = np.stack([load_gray(path, size=192) for path in sorted(paths)], axis=0)
+        volume = volume.astype(np.float32)
+        low, high = np.percentile(volume, [1, 99])
+        volume = np.clip((volume - low) / max(high - low, 1e-6), 0, 1)
+        labels = np.zeros_like(volume, dtype=np.int16)
+        z_idx = volume.shape[0] // 2
+        y_idx = volume.shape[1] // 2
+        x_idx = volume.shape[2] // 2
+        views = [
+            ("Axial slice", volume[z_idx], labels[z_idx]),
+            ("Coronal reconstruction", volume[:, y_idx, :], labels[:, y_idx, :]),
+            ("Sagittal reconstruction", volume[:, :, x_idx], labels[:, :, x_idx]),
+        ]
+        source_note = f"Fallback preview from PNG stack: test/task_1/images/{sample_id}_slice_*.png"
+        volume_title = "NIfTI-style volume preview from slice stack"
+
+    fig = plt.figure(figsize=(13.6, 7.65), dpi=180)
+    fig.text(
+        0.5,
+        0.94,
+        "Conference extension preview: 3D pelvic MRI segmentation",
+        ha="center",
+        va="center",
+        fontsize=20,
+        weight="bold",
+    )
+    image_positions = [
+        (0.045, 0.46, 0.205, 0.33),
+        (0.285, 0.46, 0.205, 0.33),
+        (0.525, 0.46, 0.205, 0.33),
+    ]
+    for i, (title, arr, label_arr) in enumerate(views):
+        ax = fig.add_axes(image_positions[i])
+        ax.imshow(overlay_labels(arr, label_arr, alpha=0.55), aspect="auto")
+        ax.set_title(title, fontsize=11, weight="bold")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    stack_ax = fig.add_axes((0.77, 0.34, 0.20, 0.46))
+    stack_ax.set_title("Stacked-slice volume cue", fontsize=11, weight="bold")
+    stack_ax.axis("off")
+    if used_real_nii:
+        slice_axis = 2
+        indices = np.linspace(0, volume.shape[2] - 1, 9, dtype=int)
+    else:
+        slice_axis = 0
+        indices = np.linspace(0, volume.shape[0] - 1, 9, dtype=int)
+    for offset, idx in enumerate(indices):
+        dx = 0.025 * offset
+        dy = 0.018 * offset
+        if slice_axis == 2:
+            stack_img = overlay_labels(np.rot90(volume[:, :, idx]), np.rot90(labels[:, :, idx]), alpha=0.55)
+        else:
+            stack_img = overlay_labels(volume[idx], labels[idx], alpha=0.55)
+        stack_ax.imshow(
+            stack_img,
+            extent=(0.04 + dx, 0.82 + dx, 0.05 + dy, 0.83 + dy),
+            alpha=0.72,
+            zorder=offset,
+        )
+        stack_ax.add_patch(
+            Rectangle(
+                (0.04 + dx, 0.05 + dy),
+                0.78,
+                0.78,
+                fill=False,
+                edgecolor="#111827",
+                linewidth=0.7,
+                alpha=0.35,
+                zorder=offset + 0.2,
+            )
+        )
+    stack_ax.set_xlim(0, 1.08)
+    stack_ax.set_ylim(0, 1.02)
+
+    text_ax = fig.add_axes((0.045, 0.08, 0.90, 0.24))
+    text_ax.axis("off")
+    text_ax.text(
+        0.0,
+        0.78,
+        "Preview of the extension: from 2D slices to 3D scan segmentation",
+        fontsize=18,
+        weight="bold",
+        ha="left",
+    )
+    text_ax.text(
+        0.0,
+        0.50,
+        "The larger-dataset extension works with NIfTI (.nii) volumes, keeping neighboring slices together "
+        "so a 3D CNN can use spatial context through the scan.",
+        fontsize=11,
+        color="#374151",
+        ha="left",
+        wrap=True,
+    )
+    text_ax.text(
+        0.0,
+        0.23,
+        f"{volume_title}. {source_note}",
+        fontsize=9,
+        color="#64748b",
+        ha="left",
+    )
+    fig.savefig(OUT / "nii_volume_preview.png", facecolor="white")
+    plt.close(fig)
+
+
 def main():
     make_data_gallery()
     make_episode_visual()
     make_reptile_workflow()
     make_unet_architecture()
     make_metric_cards()
+    make_nii_volume_preview()
     print(f"Wrote demo assets to {OUT}")
 
 

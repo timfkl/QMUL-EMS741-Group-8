@@ -24,9 +24,9 @@
 
 "Qualitatively, we can inspect the MRI, ground truth, Reptile prediction, and baseline prediction side by side. Quantitatively, Reptile outperforms the from-scratch baseline on both held-out structures across 1-shot, 3-shot, and 5-shot settings."
 
-## 2:40-3:00 - Takeaway
+## 2:40-3:00 - Conference Extension Preview and Close
 
-"The takeaway is that meta-learning does not replace the segmentation model; it gives the same U-Net a better starting point, so it can specialize faster when labelled examples are scarce."
+"As a brief preview of where the work went next, this 2D few-shot project was extended with a group for a conference-paper direction on the larger dataset. The extension moves from PNG slices to full NIfTI volumes and a 3D CNN/U-Net style architecture, scaling the segmentation pipeline toward richer 3D scan context."
 
 ## Recording Path
 

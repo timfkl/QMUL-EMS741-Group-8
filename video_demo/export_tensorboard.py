@@ -28,6 +28,8 @@ def main():
         "06_results/per_structure_dice": ROOT / "results" / "per_structure_results.png",
         "06_results/shot_count_effect": ROOT / "results" / "shot_count_per_structure.png",
         "07_summary/metric_cards": ROOT / "video_demo" / "assets" / "metric_cards.png",
+        "08_extension/cnn_architecture": ROOT / "video_demo" / "assets" / "cnn_architecture_extension.png",
+        "08_extension/nii_volume_preview": ROOT / "video_demo" / "assets" / "nii_volume_preview.png",
     }
     for tag, path in image_paths.items():
         add_image(writer, tag, path)
