@@ -4,12 +4,23 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, Rectangle
 import numpy as np
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "video_demo" / "assets"
 OUT.mkdir(parents=True, exist_ok=True)
+
+
+def font(size, bold=False):
+    candidates = [
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size=size)
+    return ImageFont.load_default()
 
 
 def load_gray(path, size=256):
@@ -67,8 +78,150 @@ def overlay_labels(image, labels, alpha=0.5):
     return np.clip(rgb, 0, 1)
 
 
-def make_data_gallery():
+def pil_overlay_pair(split, task, size=(210, 210)):
+    mask_path = strongest_masks(ROOT / split / task, 1)[0]
+    img = load_gray(pair_for_mask(mask_path), size=size[0])
+    mask = load_gray(mask_path, size=size[0])
+    arr = (overlay_mask(img, mask) * 255).astype(np.uint8)
+    return Image.fromarray(arr).resize(size)
+
+
+def draw_round_rect(draw, xy, fill, outline="#111827", radius=14, width=3):
+    draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def draw_center_text(draw, xy, text, fnt, fill="#111827", spacing=6):
+    x1, y1, x2, y2 = xy
+    lines = text.split("\n")
+    heights = []
+    widths = []
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=fnt)
+        widths.append(bbox[2] - bbox[0])
+        heights.append(bbox[3] - bbox[1])
+    total_h = sum(heights) + spacing * (len(lines) - 1)
+    y = y1 + (y2 - y1 - total_h) / 2
+    for line, w, h in zip(lines, widths, heights):
+        draw.text((x1 + (x2 - x1 - w) / 2, y), line, font=fnt, fill=fill)
+        y += h + spacing
+
+
+def arrow(draw, start, end, fill="#111827", width=5):
+    draw.line([start, end], fill=fill, width=width)
+    sx, sy = start
+    ex, ey = end
+    angle = np.arctan2(ey - sy, ex - sx)
+    head = 18
+    left = (ex - head * np.cos(angle - 0.45), ey - head * np.sin(angle - 0.45))
+    right = (ex - head * np.cos(angle + 0.45), ey - head * np.sin(angle + 0.45))
+    draw.polygon([end, left, right], fill=fill)
+
+
+def make_ml_data_structure_visuals():
+    W, H = 1920, 1080
+    title_font = font(56, bold=True)
+    h_font = font(34, bold=True)
+    body_font = font(25)
+    small_font = font(21)
+
     rows = [
+        ("train", ["task_2", "task_3", "task_5", "task_7"], "#dbeafe", "Meta-train"),
+        ("val", ["task_4", "task_6"], "#fce7f3", "Tune/checkpoint"),
+        ("test", ["task_1", "task_8"], "#dcfce7", "Final evaluation"),
+    ]
+    stages = [
+        "Dataset split folders",
+        "Tasks become organs",
+        "Image + mask pairs",
+        "Few-shot episode",
+        "Adapt and evaluate",
+    ]
+    frames = []
+
+    def base_frame(active_stage=4):
+        img = Image.new("RGB", (W, H), "#ffffff")
+        draw = ImageDraw.Draw(img)
+        draw.text((70, 48), "ML data structure: from files to few-shot episodes", font=title_font, fill="#111827")
+        draw.text(
+            (72, 118),
+            "Talk-over slide: the important idea is task separation, then support/query splitting.",
+            font=body_font,
+            fill="#4b5563",
+        )
+
+        x_positions = [90, 420, 770, 1130, 1510]
+        y_top = 210
+        for i, label in enumerate(stages):
+            fill = "#111827" if i <= active_stage else "#e5e7eb"
+            text_fill = "#ffffff" if i <= active_stage else "#6b7280"
+            draw_round_rect(draw, (x_positions[i], y_top, x_positions[i] + 260, y_top + 68), fill=fill, outline=fill, radius=10, width=1)
+            draw_center_text(draw, (x_positions[i], y_top, x_positions[i] + 260, y_top + 68), label, small_font, fill=text_fill)
+            if i < len(stages) - 1:
+                arrow(draw, (x_positions[i] + 272, y_top + 34), (x_positions[i + 1] - 14, y_top + 34), fill="#9ca3af", width=4)
+        return img, draw, x_positions
+
+    def add_content(img, draw, active_stage=4):
+        x_positions = [90, 420, 770, 1130, 1510]
+        y0 = 330
+        for row_i, (split, tasks, color, role) in enumerate(rows):
+            y = y0 + row_i * 190
+            draw_round_rect(draw, (x_positions[0], y, x_positions[0] + 260, y + 128), fill=color, radius=12, width=2)
+            draw.text((x_positions[0] + 22, y + 24), split + "/", font=h_font, fill="#111827")
+            draw.text((x_positions[0] + 22, y + 72), role, font=small_font, fill="#374151")
+            if active_stage >= 1:
+                task_text = "\n".join(tasks)
+                draw_round_rect(draw, (x_positions[1], y, x_positions[1] + 260, y + 128), fill="#f8fafc", radius=12, width=2)
+                draw_center_text(draw, (x_positions[1] + 20, y + 12, x_positions[1] + 240, y + 116), task_text, body_font, fill="#111827", spacing=2)
+                arrow(draw, (x_positions[0] + 270, y + 64), (x_positions[1] - 16, y + 64), fill="#64748b", width=4)
+            if active_stage >= 2:
+                thumb = pil_overlay_pair(split, tasks[0], size=(112, 112))
+                img.paste(thumb, (x_positions[2] + 18, y + 8))
+                draw_round_rect(draw, (x_positions[2] + 145, y + 8, x_positions[2] + 260, y + 120), fill="#f8fafc", radius=10, width=2)
+                draw_center_text(draw, (x_positions[2] + 145, y + 8, x_positions[2] + 260, y + 120), "images/\n+\nmasks/", small_font, fill="#111827")
+                arrow(draw, (x_positions[1] + 270, y + 64), (x_positions[2] - 16, y + 64), fill="#64748b", width=4)
+            if active_stage >= 3:
+                draw_round_rect(draw, (x_positions[3], y, x_positions[3] + 260, y + 128), fill="#fff7ed", radius=12, width=2)
+                draw.text((x_positions[3] + 22, y + 20), "Support", font=body_font, fill="#1d4ed8")
+                draw.text((x_positions[3] + 22, y + 56), "1 / 3 / 5 labelled", font=small_font, fill="#374151")
+                draw.text((x_positions[3] + 22, y + 88), "Query: remaining", font=small_font, fill="#be123c")
+                arrow(draw, (x_positions[2] + 270, y + 64), (x_positions[3] - 16, y + 64), fill="#64748b", width=4)
+            if active_stage >= 4:
+                draw_round_rect(draw, (x_positions[4], y, x_positions[4] + 300, y + 128), fill="#ecfdf5", radius=12, width=2)
+                draw.text((x_positions[4] + 22, y + 18), "Reptile init", font=body_font, fill="#047857")
+                draw.text((x_positions[4] + 22, y + 54), "30-step adaptation", font=small_font, fill="#374151")
+                draw.text((x_positions[4] + 22, y + 86), "Dice on query set", font=small_font, fill="#374151")
+                arrow(draw, (x_positions[3] + 270, y + 64), (x_positions[4] - 16, y + 64), fill="#64748b", width=4)
+
+        draw_round_rect(draw, (90, 940, 1830, 1015), fill="#f8fafc", outline="#cbd5e1", radius=12, width=2)
+        draw.text((120, 962), "Key point for the audience:", font=h_font, fill="#111827")
+        draw.text(
+            (570, 968),
+            "the model never mixes train/val/test tasks; adaptation uses support slices, evaluation uses query slices.",
+            font=body_font,
+            fill="#334155",
+        )
+        return img
+
+    static, draw, _ = base_frame(active_stage=4)
+    add_content(static, draw, active_stage=4)
+    static.save(OUT / "ml_data_structure_map.png")
+
+    for stage in range(5):
+        frame, frame_draw, _ = base_frame(active_stage=stage)
+        add_content(frame, frame_draw, active_stage=stage)
+        frames.extend([frame] * (8 if stage < 4 else 14))
+    frames[0].save(
+        OUT / "ml_data_structure.gif",
+        save_all=True,
+        append_images=frames[1:],
+        duration=140,
+        loop=0,
+        optimize=False,
+    )
+
+
+def make_data_gallery():
+    tasks = [
         ("train", "task_2", "Meta-train"),
         ("train", "task_3", "Meta-train"),
         ("train", "task_5", "Meta-train"),
@@ -78,30 +231,34 @@ def make_data_gallery():
         ("test", "task_1", "Held-out test"),
         ("test", "task_8", "Held-out test"),
     ]
-    fig, axes = plt.subplots(len(rows), 2, figsize=(6.6, 16.0), dpi=180)
-    for row, (split, task, role) in enumerate(rows):
+    fig, axes = plt.subplots(4, 4, figsize=(11.0, 9.6), dpi=180)
+    for idx, (split, task, role) in enumerate(tasks):
+        row = idx // 2
+        col_offset = (idx % 2) * 2
         mask_path = strongest_masks(ROOT / split / task, 1)[0]
         img = load_gray(pair_for_mask(mask_path))
         mask = load_gray(mask_path)
-        axes[row, 0].imshow(img, cmap="gray")
-        axes[row, 1].imshow(overlay_mask(img, mask))
-        for ax in axes[row]:
+        axes[row, col_offset].imshow(img, cmap="gray")
+        axes[row, col_offset + 1].imshow(overlay_mask(img, mask))
+        for ax in (axes[row, col_offset], axes[row, col_offset + 1]):
             ax.set_xticks([])
             ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_visible(False)
-        axes[row, 0].set_ylabel(
+        axes[row, col_offset].set_ylabel(
             f"{role}\n{split}/{task}",
             rotation=0,
             ha="right",
             va="center",
-            fontsize=8,
-            labelpad=34,
+            fontsize=9,
+            labelpad=20,
         )
     axes[0, 0].set_title("MRI slice", fontsize=11, weight="bold")
     axes[0, 1].set_title("Mask overlay", fontsize=11, weight="bold")
-    fig.suptitle("Few-shot segmentation tasks", fontsize=15, weight="bold", y=0.995)
-    fig.tight_layout(rect=[0.12, 0, 1, 0.985])
+    axes[0, 2].set_title("MRI slice", fontsize=11, weight="bold")
+    axes[0, 3].set_title("Mask overlay", fontsize=11, weight="bold")
+    fig.suptitle("Few-shot segmentation tasks", fontsize=16, weight="bold", y=0.98)
+    fig.tight_layout(rect=[0.05, 0, 1, 0.95], w_pad=2.0, h_pad=1.0)
     fig.savefig(OUT / "data_gallery.png", facecolor="white")
     plt.close(fig)
 
@@ -424,6 +581,7 @@ def make_nii_volume_preview():
 
 def main():
     make_data_gallery()
+    make_ml_data_structure_visuals()
     make_episode_visual()
     make_reptile_workflow()
     make_unet_architecture()

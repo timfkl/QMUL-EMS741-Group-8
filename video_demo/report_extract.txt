@@ -1,0 +1,249 @@
+Structure-Dependent Few-Shot Segmentation of
+Abdominal MRI: A Reptile Meta-Learning
+Approach
+Timothy Lundberg, Oluwaniyi Momoh, and Kabisan Thayaparan
+EMS741 – Deep Learning for Data and Image Analysis
+
+Abstract. Accurately segmenting anatomical structures from abdominal magnetic resonance (MR) images is critical for clinical applications
+such as disease assessment and treatment planning. When only a small
+number of annotated examples are available for a new structure, conventional supervised methods fail to generalise due to their reliance on
+large, labelled datasets. This work investigates few-shot medical image
+segmentation using Reptile, a first-order meta-learning algorithm, compared against a U-Net trained from scratch under identical low-data
+conditions. Both models are evaluated across 1-shot, 3-shot, and 5-shot
+settings on two unseen anatomical structures. Reptile consistently outperformed the baseline across all conditions, achieving a mean DSC of
+0.369 on task_1 compared to 0.259 for the baseline, confirming that
+meta-learned initialisation provides a meaningful advantage in low-data
+regimes. Performance on task_8 was near-zero for both methods, highlighting that structural properties such as size, shape variability, and
+foreground sparsity are primary determinants of few-shot segmentation
+difficulty. The effect of shot count was modest and non-monotonic, suggesting that support set size and adaptation budget must be considered
+jointly.
+Keywords: Few-shot learning · Medical image segmentation · Metalearning · Abdominal MRI · Reptile
+
+1
+
+Introduction
+
+Segmentation of anatomical structures in abdominal magnetic resonance imaging
+(MRI) is a critical component of modern clinical workflows, supporting applications such as diagnosis, treatment planning, and disease monitoring. Accurate
+organ delineation is particularly important in cases involving complex or rare
+pathologies, where precision directly affects clinical outcomes. However, manual
+segmentation is labour-intensive, time-consuming, and subject to inter-observer
+variability, placing a significant burden on radiologists and limiting scalability
+in clinical practice [6].
+Recent advances in deep learning have significantly improved automated
+medical image segmentation. Architectures like U-Net have become the de facto
+
+2
+
+T. Lundberg et al.
+
+standard due to their ability to capture both global context and fine structural details [8, 4, 2]. Despite their success, these models rely heavily on large
+annotated datasets. Obtaining such annotations requires expert clinicians and
+substantial time. This issue is further exacerbated for rare anatomical structures
+or novel clinical targets with limited labelled examples.
+Few-shot learning has emerged as a promising approach to address this data
+scarcity by enabling models to generalise from a small number of labelled samples
+[10]. Rather than learning each task independently, few-shot methods leverage
+prior knowledge to rapidly adapt to new tasks with minimal data. A key framework for enabling few-shot learning is meta-learning, often described as “learning
+to learn.” Meta-learning approaches train models across a distribution of tasks
+such that they acquire an initialisation that can be efficiently adapted to unseen
+tasks using only a few gradient updates [3].
+While Model-Agnostic Meta-Learning (MAML) demonstrates strong performance, it requires complex second-order gradient computations. In contrast,
+Reptile provides a simpler first-order alternative, learning effective initialisations for rapid adaptation without second-order derivatives [7]. In this work, we
+adopt a Reptile-based meta-learning approach for few-shot segmentation of abdominal MRI data, using U-Net as the backbone architecture due to its proven
+effectiveness in medical image segmentation.
+
+2
+
+Methods
+
+Dataset and tasks. An abdominal MRI dataset provided by the module organisers is used, comprising 8 anonymised structures each treated as a separate
+segmentation task. For each task, 40 scans are converted to 2D greyscale axial
+slices and resized to 256×256 pixels. Tasks are split at the task level into 4 train,
+2 validation, and 2 test tasks to avoid structure leakage. For a task and shot
+count n, support slices are sampled without replacement using seed 42 and all
+remaining slices form the query set, giving fully reproducible episodes.
+Model, Loss and Metric. A compact U-Net is employed for binary segmentation.
+The encoder uses four blocks (32, 64, 128, 256 channels) with 2 × 2 max pooling,
+mirrored by the decoder with transposed convolutions and skip connections.
+Group Normalisation (8 groups) replaces Batch Normalisation [11] for stability
+with small batches. Training optimises a combined loss L = 0.2LBCE +0.8LDice ,
+which handles foreground sparsity better than cross-entropy alone. Performance
+is evaluated using the Dice Similarity Coefficient (DSC) on query slices with a
+0.2 binarization threshold.
+Meta-training and adaptation. A Reptile first-order meta-learning algorithm is
+used to learn an initialisation that can be rapidly adapted to new tasks. At
+each outer iteration, a training task is sampled uniformly, a clone of the metamodel is adapted via the inner loop, and the Reptile update θ ← θ + ϵt (ϕ − θ) is
+applied, where ϕ are the adapted weights. SGD is used in the inner loop to avoid
+task-specific optimiser state that would distort this finite-difference update [7].
+
+Few-Shot Abdominal MRI Segmentation
+
+3
+
+Fig. 1. Overview of the Reptile meta-training and few-shot adaptation pipeline. Tasks
+are split at the task level; episodes are constructed by sampling n support slices.
+
+For meta-training, we use SGD (learning rate 3 × 10−3 with linear decay
+to 0.005) for k = 10 inner steps and 8,000 outer steps, applying random flips
+and ±15◦ rotations. The best checkpoint (step 7,600) is selected via an EMA
+(α = 0.3) smoothed validation Dice every 200 steps. At test time, the metainitialisation is adapted on the support set of each test task using 30 Adam
+steps (learning rate 1×10−3 , cosine annealing) without augmentation. To reduce
+sensitivity to randomness, the full pipeline is evaluated across three seeds (42,
+7, 123).
+
+3
+
+Experiments
+
+Setup and Evaluation Protocol. Experiments were conducted on two held-out
+test tasks from the abdominal MRI dataset: task_1 and task_8. Each task was
+evaluated under three few-shot regimes: 1-shot, 3-shot, and 5-shot, corresponding
+to the number of labelled support slices available at adaptation time. The Reptile
+meta-learner was compared against a baseline, defined as a U-Net trained from
+scratch on the same n support slices, using the same random seeds and the same
+number of inner adaptation steps (30), but without any meta-initialisation. This
+isolates the contribution of the Reptile meta-learning procedure from the effect
+of the adaptation itself.
+
+4
+
+T. Lundberg et al.
+Table 1. Mean DSC ± standard deviation (3 seeds) for Reptile vs. baseline.
+
+Task Method 1-shot
+1
+1
+8
+8
+
+3-shot
+
+5-shot
+
+Reptile 0.360 ± 0.009 0.399 ± 0.025 0.349 ± 0.005
+Baseline 0.249 ± 0.036 0.286 ± 0.034 0.242 ± 0.057
+Reptile 0.051 ± 0.036 0.049 ± 0.030 0.063 ± 0.043
+Baseline 0.013 ± 0.009 0.017 ± 0.013 0.032 ± 0.019
+
+Fig. 2. Reptile meta-training validation Dice (5-shot, 10 adaptation steps) evaluated
+on held-out validation tasks every 200 outer steps.
+
+Compute & Checkpointing. For all test evaluations, the best Reptile checkpoint,
+selected as the outer training step yielding the highest validation Dice on heldout validation tasks (step 7,600, val Dice 0.203), was used rather than the final
+checkpoint, consistent with early-stopping practice. All experiments were run on
+a single NVIDIA A40 GPU via a Jupyter notebook; the codebase was additionally validated to run on a Google Colab T4 GPU.
+
+4
+
+Results
+
+Reptile consistently outperforms the baseline across all conditions. On task_1,
+the meta-initialisation yields a mean advantage of +0.113 DSC. Task_8 is markedly
+harder for both methods (Reptile mean DSC 0.054), likely due to a smaller, less
+contiguous target structure with greater inter-patient shape variability.
+The meta-training validation curve (Figure 2) shows rapid improvement in
+val Dice to step ∼3,000, followed by a plateau around 0.19–0.20, with the best
+checkpoint selected at step 7,600. Note that val Dice is computed using only 10
+adaptation steps on the held-out validation tasks and serves solely as a checkpoint selection criterion; it is not directly comparable to the test DSC in Table
+1, which uses 30 adaptation steps on unseen test tasks.
+Qualitative results (Figure 3) reflect the quantitative findings. On task_1,
+Reptile produces a spatially coherent activation localised around the correct
+region; the baseline is noisier with greater spread into background tissue. On
+task_8, both methods produce diffuse, near-zero activations, confirming that 5
+
+Few-Shot Abdominal MRI Segmentation
+
+5
+
+Fig. 3. Qualitative segmentation results at 5-shot for the two held-out test tasks. Each
+grouped panel shows two representative query slices. Rows from top: MR image, ground
+truth mask, Reptile prediction, baseline prediction.
+
+support examples are insufficient to identify the target anatomy regardless of
+initialisation quality.
+
+5
+
+Discussion
+
+Reptile vs. Baseline. The results confirm that meta-learned initialisation provides a consistent and meaningful advantage over training from scratch in fewshot abdominal MRI segmentation. Across all shot counts and both test tasks,
+Reptile outperforms the baseline, with the gap most pronounced on task_1. This
+is consistent with the Reptile objective of finding an initialisation in a region of
+parameter space amenable to rapid adaptation [7].
+Task Difficulty and Structure Variability. The performance difference between
+task_1 and task_8 (mean DSC 0.369 vs. 0.054) demonstrates that anatomical structure properties substantially modulate few-shot segmentation difficulty.
+Task_1 achieves reasonable Dice scores across all conditions, likely corresponding to a larger structure with relatively consistent cross-sectional appearance
+across patients, providing sufficient signal for adaptation from a small support
+set. Task_8, by contrast, produces near-zero Dice for both methods across all
+shot counts, consistent with a smaller or less contiguous structure exhibiting
+greater inter-patient shape and contrast variability. These findings suggest that
+
+6
+
+T. Lundberg et al.
+
+structure size and shape consistency are stronger determinants of few-shot segmentation success than the choice of initialisation strategy, and that a minimum
+level of structural regularity may be required for meta-learning to be effective.
+Effect of Shot Count. Increasing support slices does not produce consistent
+improvements within the 30-step adaptation budget. On task_1, performance
+peaks at 3-shot (DSC 0.399) and declines at 5-shot (0.349), while task_8 remains
+flat. Additional slices likely increase the adaptation loss landscape’s complexity
+without a proportional increase in convergence steps. This suggests gains from
+additional labelled examples may only materialise if the adaptation step count
+scales accordingly.
+Limitations. Evaluation is restricted to two test tasks, limiting generalisability,
+particularly for task_8 where near-zero DSC scores make variance estimates
+unreliable. The non-monotonic shot count effect warrants investigation across
+wider adaptation budgets. Additionally, the fixed binarization threshold of 0.2
+may disadvantage task_8 where predicted probabilities are low.
+
+6
+
+Conclusion
+
+Reptile-based meta-learning was applied to few-shot segmentation of abdominal
+MRI structures, and shown to consistently outperform a from-scratch baseline
+across all evaluated conditions, with a mean DSC advantage of +0.113 on task_1
+[7]. These results confirm that meta-learned initialisations provide a practical
+benefit in low-data medical imaging settings, even under constrained adaptation
+budgets.
+The primary limitation identified is the failure of both methods on task_8,
+which is attributed to the combination of a small, sparse target structure, high
+inter-patient shape variability, and severe foreground-background imbalance.
+This represents a broader challenge in few-shot medical image segmentation:
+meta-learning can accelerate adaptation but cannot substitute for an informative support set or a well-calibrated loss function. The non-monotonic effect of
+shot count further highlights that support set size and adaptation budget must
+be considered jointly rather than in isolation.
+Future work should address these failure modes. Adopting sparse-structure
+losses, such as focal [5] or Tversky loss [9], would better balance foregroundbackground gradients. Augmenting the training distribution with MRI-specific
+transformations would improve robustness to inter-patient variability [8]. Finally,
+meta-regularisation techniques [1] could improve meta-training stability, yielding
+initialisations that transfer more reliably to structurally atypical tasks.
+
+Few-Shot Abdominal MRI Segmentation
+
+7
+
+References
+1. Antoniou, A., Edwards, H., Storkey, A.: How to train your MAML. In: ICLR (2019)
+2. Divyanshu, T. et al.: A generalizable foundation model for analysis of human brain
+MRI. Nature Neuroscience (2026)
+3. Finn, C., Abbeel, P., Levine, S.: Model-agnostic meta-learning for fast adaptation
+of deep networks. In: ICML, pp. 1126–1135 (2017)
+4. Fnu, N. et al.: An analytics-driven review of U-Net for medical image segmentation.
+ScienceDirect (2025)
+5. Lin, T.-Y. et al.: Focal loss for dense object detection. In: ICCV, pp. 2980–2988
+(2017)
+6. Litjens, G. et al.: A survey on deep learning in medical image analysis. Medical
+Image Analysis 42, 60–88 (2017)
+7. Nichol, A., Achiam, J., Schulman, J.: On first-order meta-learning algorithms.
+arXiv:1803.02999 (2018)
+8. Ronneberger, O., Fischer, P., Brox, T.: U-Net: Convolutional networks for biomedical image segmentation. In: MICCAI, pp. 234–241 (2015)
+9. Salehi, S.S.M., Erdogmus, D., Gholipour, A.: Tversky loss function for image segmentation using 3D fully convolutional deep networks. In: MLMI, pp. 379–387
+(2017)
+10. Wang, Y. et al.: Generalizing from a few examples: A survey on few-shot learning.
+ACM Computing Surveys 53(3), 1–34 (2020)
+11. Wu, Y., He, K.: Group normalization. In: ECCV, pp. 3–19 (2018)
+
+

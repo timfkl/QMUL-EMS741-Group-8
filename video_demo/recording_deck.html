@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EMS741 Recording Deck</title>
+  <style>
+    :root {
+      --ink: #101827;
+      --muted: #475569;
+      --line: #d7dee8;
+      --blue: #2454d6;
+      --rose: #d91f5c;
+      --green: #07805f;
+      --amber: #b35c00;
+      --paper: #f7f8fb;
+      --white: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      background: #0f172a;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    .slide {
+      display: none;
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      aspect-ratio: 16 / 9;
+      background: var(--white);
+      position: relative;
+      overflow: hidden;
+      padding: 54px 70px;
+    }
+    .slide.active { display: block; }
+    .slide::after {
+      content: "";
+      position: absolute;
+      left: 70px;
+      right: 70px;
+      bottom: 32px;
+      height: 1px;
+      background: var(--line);
+    }
+    .kicker {
+      color: var(--blue);
+      text-transform: uppercase;
+      font-weight: 850;
+      font-size: 17px;
+      margin: 0 0 14px;
+    }
+    h1, h2, p { margin: 0; }
+    h1 {
+      font-size: 68px;
+      line-height: 0.98;
+      max-width: 1000px;
+    }
+    h2 {
+      font-size: 50px;
+      line-height: 1.02;
+      max-width: 1040px;
+    }
+    .subtitle {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 27px;
+      line-height: 1.25;
+      max-width: 980px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 42px;
+      align-items: center;
+      height: calc(100% - 98px);
+      margin-top: 28px;
+    }
+    .grid-2.equal { grid-template-columns: 1fr 1fr; }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 22px;
+      margin-top: 36px;
+    }
+    .bullets {
+      display: grid;
+      gap: 17px;
+      margin-top: 32px;
+      max-width: 760px;
+    }
+    .bullet {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 15px;
+      align-items: start;
+      font-size: 28px;
+      line-height: 1.16;
+      color: var(--ink);
+    }
+    .dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 99px;
+      background: var(--rose);
+      margin-top: 9px;
+    }
+    .bullet:nth-child(2) .dot { background: var(--green); }
+    .bullet:nth-child(3) .dot { background: var(--amber); }
+    .bullet:nth-child(4) .dot { background: var(--blue); }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      background: #f8fafc;
+      min-height: 150px;
+    }
+    .stat strong {
+      display: block;
+      font-size: 48px;
+      line-height: 1;
+      color: var(--green);
+      margin-bottom: 14px;
+    }
+    .stat span {
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1.22;
+    }
+    .media {
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+    .media.clean {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+    .full-media {
+      width: 100%;
+      height: calc(100% - 180px);
+      object-fit: contain;
+      margin-top: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+    .full-media.clean { 
+      border: 0; 
+      background: transparent;
+    }
+    .takeaway {
+      position: absolute;
+      left: 70px;
+      right: 70px;
+      bottom: 54px;
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 18px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 22px;
+      line-height: 1.2;
+    }
+    .takeaway b { color: var(--ink); font-size: 24px; }
+    .label-strip {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 26px;
+    }
+    .label {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 18px;
+      color: var(--muted);
+      background: #f8fafc;
+    }
+    .progress {
+      position: fixed;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      color: #e2e8f0;
+      font-size: 13px;
+      z-index: 50;
+      background: rgba(15, 23, 42, 0.74);
+      border: 1px solid rgba(226, 232, 240, 0.22);
+      border-radius: 999px;
+      padding: 7px 12px;
+    }
+    .hint {
+      position: fixed;
+      right: 18px;
+      bottom: 12px;
+      color: #cbd5e1;
+      font-size: 12px;
+      z-index: 50;
+    }
+    .quote {
+      margin-top: 36px;
+      border-left: 6px solid var(--blue);
+      padding-left: 24px;
+      color: var(--muted);
+      font-size: 29px;
+      line-height: 1.23;
+      max-width: 980px;
+    }
+    .footer-note {
+      position: absolute;
+      left: 70px;
+      bottom: 52px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    @media (max-width: 900px) {
+      .slide { padding: 34px; }
+      h1 { font-size: 42px; }
+      h2 { font-size: 34px; }
+      .subtitle, .bullet { font-size: 20px; }
+      .grid-2, .grid-2.equal, .grid-3 { grid-template-columns: 1fr; }
+      .media, .full-media { max-height: 46vh; height: auto; }
+      .takeaway { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active">
+      <p class="kicker">EMS741 Group 8</p>
+      <h1>Structure-dependent few-shot MRI segmentation</h1>
+      <p class="subtitle">A visual demo of Reptile meta-learning for low-label abdominal MRI segmentation, plus the later 3D conference-paper extension.</p>
+      <div class="grid-3">
+        <div class="stat"><strong>8</strong><span>structures treated as separate segmentation tasks</span></div>
+        <div class="stat"><strong>1/3/5</strong><span>labelled support slices used for test-time adaptation</span></div>
+        <div class="stat"><strong>+0.113</strong><span>mean DSC advantage on task_1 reported in the final paper</span></div>
+      </div>
+      <p class="footer-note">Use arrow keys or space to move through slides. Press F11 before recording.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Problem</p>
+      <h2>Manual labels are the bottleneck</h2>
+      <div class="grid-2">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Medical segmentation needs expert annotation.</span></div>
+          <div class="bullet"><span class="dot"></span><span>New structures rarely arrive with large labelled datasets.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Few-shot learning asks: can we adapt from only a handful of examples?</span></div>
+        </div>
+        <img class="media" src="assets/data_gallery.png" alt="MRI examples and mask overlays">
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Data Structure</p>
+      <h2>Tasks stay separated to prevent structure leakage</h2>
+      <img class="full-media clean" src="assets/ml_data_structure.gif" alt="Animated map of train validation test tasks becoming support and query episodes">
+      <div class="takeaway"><b>Talk over:</b><span>Train, validation, and test are split by task. Within a task, support slices adapt the model and query slices measure Dice.</span></div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Episode Construction</p>
+      <h2>Support teaches; query tests</h2>
+      <div class="grid-2">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Sample n labelled support slices.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Hold back the remaining slices as query data.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Use the same protocol for Reptile and baseline.</span></div>
+        </div>
+        <img class="media clean" src="assets/few_shot_episode.png" alt="Few-shot support and query episode">
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Model</p>
+      <h2>Same U-Net, different starting point</h2>
+      <div class="grid-2 equal">
+        <img class="media clean" src="assets/unet_architecture.png" alt="Compact U-Net architecture">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Compact encoder-decoder U-Net.</span></div>
+          <div class="bullet"><span class="dot"></span><span>GroupNorm stabilizes small batches.</span></div>
+          <div class="bullet"><span class="dot"></span><span>BCE + Dice loss handles sparse foreground masks.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Meta-Learning</p>
+      <h2>Reptile learns weights that adapt quickly</h2>
+      <div class="grid-2">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Sample a training task.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Clone the model and run a short inner loop.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Move the meta-weights toward the adapted weights.</span></div>
+        </div>
+        <img class="media clean" src="assets/reptile_workflow.png" alt="Reptile meta-training workflow">
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Qualitative Result</p>
+      <h2>5-shot predictions on held-out structures</h2>
+      <img class="full-media" src="../results/qualitative_combined_nshot5.png" alt="Qualitative MRI segmentation results">
+      <div class="takeaway"><b>Point out:</b><span>Task_1 is spatially coherent; task_8 remains difficult because the target is small and sparse.</span></div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Quantitative Result</p>
+      <h2>Reptile wins, but structure difficulty dominates</h2>
+      <div class="grid-2 equal">
+        <img class="media" src="../results/per_structure_results.png" alt="Per-structure Dice results">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Task_1: Reptile mean DSC 0.369 vs baseline 0.259.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Task_8: near-zero for both methods.</span></div>
+          <div class="bullet"><span class="dot"></span><span>More shots did not guarantee better results within 30 adaptation steps.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Paper Takeaway</p>
+      <h2>Meta-learning helps, but cannot invent missing signal</h2>
+      <p class="quote">"Support set size and adaptation budget must be considered jointly rather than in isolation."</p>
+      <div class="label-strip">
+        <span class="label">task size</span>
+        <span class="label">shape variability</span>
+        <span class="label">foreground sparsity</span>
+        <span class="label">adaptation budget</span>
+      </div>
+      <div class="bullets">
+        <div class="bullet"><span class="dot"></span><span>Reptile provides a better initialization in low-data settings.</span></div>
+        <div class="bullet"><span class="dot"></span><span>The hard case shows why anatomy-specific structure matters.</span></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Extension Preview</p>
+      <h2>From 2D few-shot slices to 3D pelvic MRI volumes</h2>
+      <div class="grid-2">
+        <div class="bullets">
+          <div class="bullet"><span class="dot"></span><span>Follow-on group work for a conference-paper direction.</span></div>
+          <div class="bullet"><span class="dot"></span><span>Larger source dataset represented as NIfTI volumes.</span></div>
+          <div class="bullet"><span class="dot"></span><span>3D CNN/U-Net style segmentation uses spatial context through the scan.</span></div>
+        </div>
+        <img class="media" src="assets/cnn_architecture_extension.png" alt="3D U-Net architecture schematic">
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">3D Scan View</p>
+      <h2>NIfTI keeps the scan as a volume</h2>
+      <img class="full-media clean" src="assets/nii_volume_preview.png" alt="NIfTI volume preview">
+      <div class="takeaway"><b>Close with:</b><span>The extension scales the same segmentation motivation from slice-level adaptation toward full-volume anatomical context.</span></div>
+    </section>
+  </main>
+  <div class="progress" id="progress">1 / 11</div>
+  <div class="hint">Space / arrows to navigate</div>
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const progress = document.getElementById("progress");
+    let index = Number(new URLSearchParams(window.location.search).get("slide") || 0);
+    function show(next) {
+      index = Math.max(0, Math.min(slides.length - 1, next));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      progress.textContent = `${index + 1} / ${slides.length}`;
+      const url = new URL(window.location.href);
+      url.searchParams.set("slide", String(index));
+      history.replaceState(null, "", url);
+    }
+    function move(delta) { show(index + delta); }
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "ArrowDown", " ", "PageDown"].includes(event.key)) {
+        event.preventDefault();
+        move(1);
+      }
+      if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(event.key)) {
+        event.preventDefault();
+        move(-1);
+      }
+      if (event.key === "Home") show(0);
+      if (event.key === "End") show(slides.length - 1);
+    });
+    document.addEventListener("click", () => move(1));
+    show(index);
+  </script>
+</body>
+</html>
